@@ -44,7 +44,6 @@ class CNN(nn.Module):
             nn.Dropout(0.5),
             
             nn.Linear(512, nclass),  # 최종 출력: 클래스 수(nclass)
-            nn.Softmax(dim=1)
         )
     
     def forward(self, x):

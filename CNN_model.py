@@ -12,6 +12,7 @@ import numpy as np
 from torch.utils.data.sampler import WeightedRandomSampler  # WeightedRandomSampler를 위한 import
 from collections import Counter
 import random
+import matplotlib.pyplot as plt
 
 # 랜덤 시드 고정 함수
 def set_seed(seed):
@@ -62,7 +63,7 @@ class VehicleDataset(Dataset):
                     if class_image_count >= self.max_images_per_class:
                         break  # 클래스별 최대 이미지 개수를 넘으면 중단
                     if vehicle_type == 'SUV' or vehicle_type == '세단':
-                        if brand_image_count >= self.max_images_per_brand/5:
+                        if brand_image_count >= self.max_images_per_brand/10:
                             break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                     else:
                         if brand_image_count >= self.max_images_per_brand:
@@ -220,7 +221,7 @@ train_dataset = VehicleDataset(
     transform=train_transform, 
     mode='train', 
     max_images_per_class=10000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=400     # 각 브랜드별 최대 300장
+    max_images_per_brand=1200     # 각 브랜드별 최대 300장
 )
 
 val_dataset = VehicleDataset(
@@ -229,7 +230,7 @@ val_dataset = VehicleDataset(
     transform=val_transform, 
     mode='val', 
     max_images_per_class=1000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=40     # 각 브랜드별 최대 300장
+    max_images_per_brand=120     # 각 브랜드별 최대 300장
 )
 
 # 클래스별 샘플 수 계산
@@ -322,6 +323,12 @@ best_val_acc = 0  # 최고 검증 정확도 초기값
 best_val_loss = float('inf')  # 최고 검증 손실 초기값 (초기값은 무한대 설정)
 save_path = 'data/models/best_cnn_model.pth'  # 모델을 저장할 경로
 
+# 학습 및 검증 기록을 저장할 리스트
+train_losses = []
+val_losses = []
+train_accuracies = []
+val_accuracies = []
+
 epoch_num = 100
 
 for epoch in range(epoch_num):
@@ -332,6 +339,12 @@ for epoch in range(epoch_num):
     
     # 검증
     val_loss, val_acc = validate(model, val_loader, criterion, device)
+    
+    # 학습 및 검증 결과 저장
+    train_losses.append(train_loss)
+    val_losses.append(val_loss)
+    train_accuracies.append(train_acc)
+    val_accuracies.append(val_acc)
     
     print(f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_acc:.2f}%")
     print(f"Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_acc:.2f}%")
@@ -359,3 +372,32 @@ for epoch in range(epoch_num):
     if early_stopping.early_stop:
         print("Early stopping")
         break
+
+# 학습 손실 및 정확도 시각화
+def plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies):
+    epochs = range(1, len(train_losses) + 1)
+
+    # 손실 그래프
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(epochs, train_losses, label='Train Loss')
+    plt.plot(epochs, val_losses, label='Validation Loss')
+    plt.title('Loss over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.legend()
+
+    # 정확도 그래프
+    plt.subplot(1, 2, 2)
+    plt.plot(epochs, train_accuracies, label='Train Accuracy')
+    plt.plot(epochs, val_accuracies, label='Validation Accuracy')
+    plt.title('Accuracy over Epochs')
+    plt.xlabel('Epochs')
+    plt.ylabel('Accuracy (%)')
+    plt.legend()
+
+    plt.show()
+
+# 학습 곡선 시각화
+plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies)
