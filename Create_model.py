@@ -13,6 +13,19 @@ from torch.utils.data.sampler import WeightedRandomSampler  # WeightedRandomSamp
 from collections import Counter
 import random
 import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import matplotlib.font_manager as fm
+from matplotlib import rc
+import torchvision.models as models
+
+# 한글 폰트 설정
+font_path = 'C:/practice_coding/data/NanumGothic.ttf'  # 한글 폰트 경로를 지정
+fontprop = fm.FontProperties(fname=font_path)
+rc('font', family=fontprop.get_name())
+
+# 한글이 포함된 마이너스 기호 깨짐 방지
+plt.rcParams['axes.unicode_minus'] = False
 
 # 랜덤 시드 고정 함수
 def set_seed(seed):
@@ -62,9 +75,20 @@ class VehicleDataset(Dataset):
                 for img_file in image_files:
                     if class_image_count >= self.max_images_per_class:
                         break  # 클래스별 최대 이미지 개수를 넘으면 중단
-                    if vehicle_type == 'SUV' or vehicle_type == '세단':
-                        if brand_image_count >= self.max_images_per_brand/10:
-                            break  # 브랜드별 최대 이미지 개수를 넘으면 중단
+                    if vehicle_type == 'SUV':
+                        if mode == 'val':
+                            if brand_image_count >= self.max_images_per_brand/7:
+                                break  # 브랜드별 최대 이미지 개수를 넘으면 중단
+                        else:
+                            if brand_image_count >= self.max_images_per_brand/20:
+                                break  # 브랜드별 최대 이미지 개수를 넘으면 중단
+                    elif vehicle_type == '세단':
+                        if mode == 'val':
+                            if brand_image_count >= self.max_images_per_brand/7:
+                                break  # 브랜드별 최대 이미지 개수를 넘으면 중단
+                        else:
+                            if brand_image_count >= self.max_images_per_brand/18:
+                                break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                     else:
                         if brand_image_count >= self.max_images_per_brand:
                             break  # 브랜드별 최대 이미지 개수를 넘으면 중단
@@ -111,37 +135,21 @@ class VehicleDataset(Dataset):
         class_distribution = {classes[label]: count for label, count in label_counts.items()}
         return class_distribution
 
-# CNN 모델 정의
-class CNN(nn.Module):
-    def __init__(self, imgH, nc, nclass):
-        super(CNN, self).__init__()
-        self.cnn = nn.Sequential(
-            nn.Conv2d(nc, 32, kernel_size=3, stride=1, padding='same'),  # 첫 번째 Conv2D: 필터 32개, padding='same'
-            nn.ReLU(True),
-            nn.MaxPool2d(2, 2),  # MaxPooling: 이미지 크기 반으로 줄임
-            nn.Dropout(0.25),
-            
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding='same'),  # 두 번째 Conv2D: 필터 64개, padding='same'
-            nn.ReLU(True),
-            nn.MaxPool2d(2, 2),  # MaxPooling: 이미지 크기 반으로 줄임
-            nn.Dropout(0.25),
-            
-            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding='same'),  # 세 번째 Conv2D: 필터 128개
-            nn.ReLU(True),
-            nn.MaxPool2d(2, 2),
-            nn.Dropout(0.25),
-            
-            nn.Flatten(),  # Flatten을 통해 1D 텐서로 변환
-            
-            nn.Linear(16*16*128, 512),  # Fully connected layer
-            nn.ReLU(True),
-            nn.Dropout(0.5),
-            
-            nn.Linear(512, nclass),  # 최종 출력: 클래스 수(nclass)
-        )
+class ResNet50Model(nn.Module):
+    def __init__(self, nclass, pretrained=True):
+        super(ResNet50Model, self).__init__()
+        
+        # torchvision에서 제공하는 ResNet50 모델 불러오기
+        # pretrained=True로 하면 ImageNet에서 사전 학습된 가중치를 사용
+        self.resnet50 = models.resnet50(pretrained=pretrained)
+        
+        # 마지막 FC layer를 교체: ResNet50의 기본 출력은 1000개 클래스(ImageNet용)이므로
+        # nclass에 맞게 마지막 레이어 변경
+        num_ftrs = self.resnet50.fc.in_features
+        self.resnet50.fc = nn.Linear(num_ftrs, nclass)
     
     def forward(self, x):
-        return self.cnn(x)
+        return self.resnet50(x)
 
 
 # 학습 함수 정의 (Gradient Clipping 삭제)
@@ -200,10 +208,10 @@ def validate(model, dataloader, criterion, device):
 # 데이터 보강을 위한 transform 정의
 train_transform = transforms.Compose([
     transforms.Resize((128, 128)),
-    # transforms.RandomRotation(15),
+    transforms.RandomRotation(15),
     # transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
     # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-    # transforms.RandomHorizontalFlip(),
+    transforms.RandomHorizontalFlip(),
     transforms.ToTensor(),
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
@@ -220,8 +228,8 @@ train_dataset = VehicleDataset(
     label_dir="D:/dataset/자동차_차종_번호판_데이터/Training/라벨링데이터/차종분류데이터", 
     transform=train_transform, 
     mode='train', 
-    max_images_per_class=10000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=1200     # 각 브랜드별 최대 300장
+    max_images_per_class=15000,   # 각 클래스별 최대 1000장
+    max_images_per_brand=3000     # 각 브랜드별 최대 300장
 )
 
 val_dataset = VehicleDataset(
@@ -229,8 +237,8 @@ val_dataset = VehicleDataset(
     label_dir="D:/dataset/자동차_차종_번호판_데이터/Validation/라벨링데이터/차종분류데이터", 
     transform=val_transform, 
     mode='val', 
-    max_images_per_class=1000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=120     # 각 브랜드별 최대 300장
+    max_images_per_class=3000,   # 각 클래스별 최대 1000장
+    max_images_per_brand=300     # 각 브랜드별 최대 300장
 )
 
 # 클래스별 샘플 수 계산
@@ -250,7 +258,7 @@ val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
 # 학습에 필요한 요소 정의 (Early Stopping 및 Learning Rate Scheduler 추가)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = CNN(imgH=128, nc=3, nclass=5).to(device)  # 클래스 수는 5로 설정
+model = ResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
 criterion = nn.CrossEntropyLoss()  # Categorical Crossentropy에 대응
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
@@ -400,4 +408,38 @@ def plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuraci
     plt.show()
 
 # 학습 곡선 시각화
-plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies)
+# plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies)
+
+# 검증 데이터에 대해 예측 및 컨퓨전 매트릭스 계산
+def compute_confusion_matrix(model, dataloader, device, class_names):
+    model.eval()
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in dataloader:
+            images = images.to(device)
+            labels = labels.to(device)
+            outputs = model(images)
+            _, preds = torch.max(outputs, 1)
+
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    # 컨퓨전 매트릭스 계산
+    cm = confusion_matrix(all_labels, all_preds)
+
+    # 컨퓨전 매트릭스 시각화
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", xticklabels=class_names, yticklabels=class_names)
+    plt.title('컨퓨전 매트릭스', fontproperties=fontprop)  # 한글 제목
+    plt.xlabel('예측된 라벨', fontproperties=fontprop)  # 한글 X축
+    plt.ylabel('실제 라벨', fontproperties=fontprop)    # 한글 Y축
+    plt.show()
+
+
+    # 클래스 이름 정의 (예: ['SUV', '세단', '버스', '이륜차', '트럭'])
+class_names = train_dataset.label_encoder.classes_
+
+# 컨퓨전 매트릭스 계산 및 시각화
+# compute_confusion_matrix(model, val_loader, device, class_names)
