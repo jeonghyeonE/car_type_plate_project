@@ -264,7 +264,7 @@ val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
 # 학습에 필요한 요소 정의 (Early Stopping 및 Learning Rate Scheduler 추가)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = model = ModifiedResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
+model = ModifiedResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
 criterion = nn.CrossEntropyLoss()  # Categorical Crossentropy에 대응
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
