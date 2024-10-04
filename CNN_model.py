@@ -62,7 +62,7 @@ class VehicleDataset(Dataset):
                     if class_image_count >= self.max_images_per_class:
                         break  # 클래스별 최대 이미지 개수를 넘으면 중단
                     if vehicle_type == 'SUV' or vehicle_type == '세단':
-                        if brand_image_count >= self.max_images_per_brand/10:
+                        if brand_image_count >= self.max_images_per_brand/5:
                             break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                     else:
                         if brand_image_count >= self.max_images_per_brand:
@@ -137,7 +137,6 @@ class CNN(nn.Module):
             nn.Dropout(0.5),
             
             nn.Linear(512, nclass),  # 최종 출력: 클래스 수(nclass)
-            nn.Softmax(dim=1)
         )
     
     def forward(self, x):
@@ -221,7 +220,7 @@ train_dataset = VehicleDataset(
     transform=train_transform, 
     mode='train', 
     max_images_per_class=10000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=200     # 각 브랜드별 최대 300장
+    max_images_per_brand=400     # 각 브랜드별 최대 300장
 )
 
 val_dataset = VehicleDataset(
@@ -230,7 +229,7 @@ val_dataset = VehicleDataset(
     transform=val_transform, 
     mode='val', 
     max_images_per_class=1000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=30     # 각 브랜드별 최대 300장
+    max_images_per_brand=40     # 각 브랜드별 최대 300장
 )
 
 # 클래스별 샘플 수 계산
