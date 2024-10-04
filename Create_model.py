@@ -77,17 +77,17 @@ class VehicleDataset(Dataset):
                         break  # 클래스별 최대 이미지 개수를 넘으면 중단
                     if vehicle_type == 'SUV':
                         if mode == 'val':
-                            if brand_image_count >= self.max_images_per_brand/7:
+                            if brand_image_count >= self.max_images_per_brand/5:
                                 break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                         else:
-                            if brand_image_count >= self.max_images_per_brand/20:
+                            if brand_image_count >= self.max_images_per_brand/18:
                                 break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                     elif vehicle_type == '세단':
                         if mode == 'val':
                             if brand_image_count >= self.max_images_per_brand/7:
                                 break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                         else:
-                            if brand_image_count >= self.max_images_per_brand/18:
+                            if brand_image_count >= self.max_images_per_brand/14:
                                 break  # 브랜드별 최대 이미지 개수를 넘으면 중단
                     else:
                         if brand_image_count >= self.max_images_per_brand:
@@ -135,18 +135,24 @@ class VehicleDataset(Dataset):
         class_distribution = {classes[label]: count for label, count in label_counts.items()}
         return class_distribution
 
-class ResNet50Model(nn.Module):
+class ModifiedResNet50Model(nn.Module):
     def __init__(self, nclass, pretrained=True):
-        super(ResNet50Model, self).__init__()
+        super(ModifiedResNet50Model, self).__init__()
         
         # torchvision에서 제공하는 ResNet50 모델 불러오기
-        # pretrained=True로 하면 ImageNet에서 사전 학습된 가중치를 사용
         self.resnet50 = models.resnet50(pretrained=pretrained)
         
-        # 마지막 FC layer를 교체: ResNet50의 기본 출력은 1000개 클래스(ImageNet용)이므로
-        # nclass에 맞게 마지막 레이어 변경
-        num_ftrs = self.resnet50.fc.in_features
-        self.resnet50.fc = nn.Linear(num_ftrs, nclass)
+        # 기존 FC 레이어를 덮어쓰기 전에 새로운 FC 레이어를 추가
+        num_ftrs = self.resnet50.fc.in_features  # ResNet50의 기본 FC 입력 차원
+        
+        # 새로운 FC 레이어 추가
+        self.resnet50.fc = nn.Sequential(
+            nn.Linear(num_ftrs, 512),  # 첫 번째 FC 레이어 (새로 추가된 레이어)
+            nn.ReLU(True),             # 활성화 함수
+            nn.Dropout(0.5),           # 드롭아웃으로 과적합 방지
+            
+            nn.Linear(512, nclass)     # 최종 출력 레이어 (nclass로 설정)
+        )
     
     def forward(self, x):
         return self.resnet50(x)
@@ -208,7 +214,7 @@ def validate(model, dataloader, criterion, device):
 # 데이터 보강을 위한 transform 정의
 train_transform = transforms.Compose([
     transforms.Resize((128, 128)),
-    transforms.RandomRotation(15),
+    # transforms.RandomRotation(15),
     # transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
     # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
     transforms.RandomHorizontalFlip(),
@@ -228,8 +234,8 @@ train_dataset = VehicleDataset(
     label_dir="D:/dataset/자동차_차종_번호판_데이터/Training/라벨링데이터/차종분류데이터", 
     transform=train_transform, 
     mode='train', 
-    max_images_per_class=15000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=3000     # 각 브랜드별 최대 300장
+    max_images_per_class=30000,   # 각 클래스별 최대 1000장
+    max_images_per_brand=6000     # 각 브랜드별 최대 300장
 )
 
 val_dataset = VehicleDataset(
@@ -237,8 +243,8 @@ val_dataset = VehicleDataset(
     label_dir="D:/dataset/자동차_차종_번호판_데이터/Validation/라벨링데이터/차종분류데이터", 
     transform=val_transform, 
     mode='val', 
-    max_images_per_class=3000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=300     # 각 브랜드별 최대 300장
+    max_images_per_class=10000,   # 각 클래스별 최대 1000장
+    max_images_per_brand=600     # 각 브랜드별 최대 300장
 )
 
 # 클래스별 샘플 수 계산
@@ -258,7 +264,7 @@ val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
 
 # 학습에 필요한 요소 정의 (Early Stopping 및 Learning Rate Scheduler 추가)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
+model = model = ModifiedResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
 criterion = nn.CrossEntropyLoss()  # Categorical Crossentropy에 대응
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
