@@ -101,8 +101,8 @@ class VehicleDataset(Dataset):
                             label_data = json.load(f)
                             self.image_paths.append(img_path)
                             self.labels.append(label_data['car']['attributes']['model'].split('_')[0])
-                            class_image_count += 1  # 클래스 이미지 개수 업데이트
-                            brand_image_count += 1  # 브랜드 이미지 개수 업데이트
+                            # class_image_count += 1  # 클래스 이미지 개수 업데이트
+                            # brand_image_count += 1  # 브랜드 이미지 개수 업데이트
 
                 if class_image_count >= self.max_images_per_class:
                     break  # 클래스별 최대 이미지 개수를 넘으면 중단
@@ -135,28 +135,49 @@ class VehicleDataset(Dataset):
         class_distribution = {classes[label]: count for label, count in label_counts.items()}
         return class_distribution
 
-class ModifiedResNet50Model(nn.Module):
-    def __init__(self, nclass, pretrained=True):
-        super(ModifiedResNet50Model, self).__init__()
+# class ModifiedResNet50Model(nn.Module):
+#     def __init__(self, nclass, pretrained=True):
+#         super(ModifiedResNet50Model, self).__init__()
         
-        # torchvision에서 제공하는 ResNet50 모델 불러오기
-        self.resnet50 = models.resnet50(pretrained=pretrained)
+#         # torchvision에서 제공하는 ResNet50 모델 불러오기
+#         self.resnet50 = models.resnet50(pretrained=pretrained)
+        
+#         # 기존 FC 레이어를 덮어쓰기 전에 새로운 FC 레이어를 추가
+#         num_ftrs = self.resnet50.fc.in_features  # ResNet50의 기본 FC 입력 차원
+        
+#         # 새로운 FC 레이어 추가
+#         self.resnet50.fc = nn.Sequential(
+#             nn.Linear(num_ftrs, 512),  # 첫 번째 FC 레이어 (새로 추가된 레이어)
+#             nn.ReLU(True),             # 활성화 함수
+#             nn.Dropout(0.5),           # 드롭아웃으로 과적합 방지
+            
+#             nn.Linear(512, nclass)     # 최종 출력 레이어 (nclass로 설정)
+#         )
+    
+#     def forward(self, x):
+#         return self.resnet50(x)
+
+# EfficientNetB0 모델로 수정
+class ModifiedEfficientNetB0Model(nn.Module):
+    def __init__(self, nclass, pretrained=True):
+        super(ModifiedEfficientNetB0Model, self).__init__()
+        
+        # torchvision에서 제공하는 EfficientNetB0 모델 불러오기
+        self.efficientnet_b0 = models.efficientnet_b0(pretrained=pretrained)
         
         # 기존 FC 레이어를 덮어쓰기 전에 새로운 FC 레이어를 추가
-        num_ftrs = self.resnet50.fc.in_features  # ResNet50의 기본 FC 입력 차원
+        num_ftrs = self.efficientnet_b0.classifier[1].in_features  # EfficientNetB0의 기본 FC 입력 차원
         
         # 새로운 FC 레이어 추가
-        self.resnet50.fc = nn.Sequential(
+        self.efficientnet_b0.classifier = nn.Sequential(
             nn.Linear(num_ftrs, 512),  # 첫 번째 FC 레이어 (새로 추가된 레이어)
             nn.ReLU(True),             # 활성화 함수
             nn.Dropout(0.5),           # 드롭아웃으로 과적합 방지
-            
             nn.Linear(512, nclass)     # 최종 출력 레이어 (nclass로 설정)
         )
     
     def forward(self, x):
-        return self.resnet50(x)
-
+        return self.efficientnet_b0(x)
 
 # 학습 함수 정의 (Gradient Clipping 삭제)
 def train(model, dataloader, criterion, optimizer, device):
@@ -213,7 +234,8 @@ def validate(model, dataloader, criterion, device):
 
 # 데이터 보강을 위한 transform 정의
 train_transform = transforms.Compose([
-    transforms.Resize((128, 128)),
+    transforms.Resize((224, 224)),
+    # transforms.Resize((128, 128)),
     # transforms.RandomRotation(15),
     # transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
     # transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
@@ -223,7 +245,8 @@ train_transform = transforms.Compose([
 ])
 
 val_transform = transforms.Compose([
-    transforms.Resize((128, 128)),  # 크기 조정
+    transforms.Resize((224, 224)),
+    # transforms.Resize((128, 128)),  # 크기 조정
     transforms.ToTensor(),  # 텐서로 변환
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # 이미지 정규화
 ])
@@ -234,8 +257,8 @@ train_dataset = VehicleDataset(
     label_dir="D:/dataset/자동차_차종_번호판_데이터/Training/라벨링데이터/차종분류데이터", 
     transform=train_transform, 
     mode='train', 
-    max_images_per_class=30000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=6000     # 각 브랜드별 최대 300장
+    max_images_per_class=51000,   # 각 클래스별 최대 1000장
+    max_images_per_brand=10000     # 각 브랜드별 최대 300장
 )
 
 val_dataset = VehicleDataset(
@@ -244,7 +267,7 @@ val_dataset = VehicleDataset(
     transform=val_transform, 
     mode='val', 
     max_images_per_class=10000,   # 각 클래스별 최대 1000장
-    max_images_per_brand=600     # 각 브랜드별 최대 300장
+    max_images_per_brand=1000     # 각 브랜드별 최대 300장
 )
 
 # 클래스별 샘플 수 계산
@@ -259,12 +282,13 @@ samples_weight = samples_weight.double()
 sampler = WeightedRandomSampler(samples_weight, len(samples_weight))
 
 # 데이터로더 생성 (sampler 사용)
-train_loader = DataLoader(train_dataset, batch_size=64, sampler=sampler)
-val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
+train_loader = DataLoader(train_dataset, batch_size=128, sampler=sampler)
+val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False)
 
 # 학습에 필요한 요소 정의 (Early Stopping 및 Learning Rate Scheduler 추가)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = ModifiedResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
+model = ModifiedEfficientNetB0Model(nclass=5).to(device)
+# model = ModifiedResNet50Model(nclass=5).to(device)  # 클래스 수는 5로 설정
 criterion = nn.CrossEntropyLoss()  # Categorical Crossentropy에 대응
 optimizer = optim.Adam(model.parameters(), lr=0.0001)
 
@@ -335,7 +359,7 @@ for class_name, count in val_class_distribution.items():
 # 학습 및 검증 진행
 best_val_acc = 0  # 최고 검증 정확도 초기값
 best_val_loss = float('inf')  # 최고 검증 손실 초기값 (초기값은 무한대 설정)
-save_path = 'data/models/best_cnn_model.pth'  # 모델을 저장할 경로
+save_path = 'data/models/best_model.pth'  # 모델을 저장할 경로
 
 # 학습 및 검증 기록을 저장할 리스트
 train_losses = []
@@ -414,7 +438,7 @@ def plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuraci
     plt.show()
 
 # 학습 곡선 시각화
-# plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies)
+plot_learning_curve(train_losses, val_losses, train_accuracies, val_accuracies)
 
 # 검증 데이터에 대해 예측 및 컨퓨전 매트릭스 계산
 def compute_confusion_matrix(model, dataloader, device, class_names):
@@ -448,4 +472,4 @@ def compute_confusion_matrix(model, dataloader, device, class_names):
 class_names = train_dataset.label_encoder.classes_
 
 # 컨퓨전 매트릭스 계산 및 시각화
-# compute_confusion_matrix(model, val_loader, device, class_names)
+compute_confusion_matrix(model, val_loader, device, class_names)
