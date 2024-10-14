@@ -1,53 +1,44 @@
 import cv2
 import torch
+import torch.nn as nn
 from torchvision import transforms
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+import torchvision.models as models
 
 # PyTorch Hub에서 YOLOv5 모델 로드
 yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
-# CRNN 모델 정의 (이전 코드 그대로 사용)
-class CRNN(torch.nn.Module):
-    def __init__(self, imgH, nc, nclass, nh):
-        super(CRNN, self).__init__()
-        self.cnn = torch.nn.Sequential(
-            torch.nn.Conv2d(nc, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(64),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(128),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(256),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.AdaptiveAvgPool2d((1, None))
+# EfficientNetB0 모델로 수정
+class ModifiedEfficientNetB0Model(nn.Module):
+    def __init__(self, nclass, pretrained=True):
+        super(ModifiedEfficientNetB0Model, self).__init__()
+        
+        # torchvision에서 제공하는 EfficientNetB0 모델 불러오기
+        self.efficientnet_b0 = models.efficientnet_b0(pretrained=pretrained)
+        
+        # 기존 FC 레이어를 덮어쓰기 전에 새로운 FC 레이어를 추가
+        num_ftrs = self.efficientnet_b0.classifier[1].in_features  # EfficientNetB0의 기본 FC 입력 차원
+        
+        # 새로운 FC 레이어 추가
+        self.efficientnet_b0.classifier = nn.Sequential(
+            nn.Linear(num_ftrs, 512),  # 첫 번째 FC 레이어 (새로 추가된 레이어)
+            nn.ReLU(True),             # 활성화 함수
+            nn.Dropout(0.5),           # 드롭아웃으로 과적합 방지
+            nn.Linear(512, nclass)     # 최종 출력 레이어 (nclass로 설정)
         )
-
-        self.rnn = torch.nn.LSTM(256, nh, bidirectional=True, batch_first=True)
-        self.fc = torch.nn.Linear(nh * 2, nclass)
-
+    
     def forward(self, x):
-        conv = self.cnn(x)
-        b, c, h, w = conv.size()
-        conv = conv.squeeze(2)
-        conv = conv.permute(0, 2, 1)
-        output, _ = self.rnn(conv)
-        output = output[:, -1, :]
-        output = self.fc(output)
-        return output
+        return self.efficientnet_b0(x)
 
 # 차량 클래스 정의
-vehicle_classes = ['SUV', '버스', '세단', '승합', '이륜차', '트럭', '해치백', '화물']
+vehicle_classes = ['SUV', '버스', '세단', '이륜차', '트럭']
 
-# 사전 학습된 CRNN 모델 로드
+# 사전 학습된 ModifiedResNet50Model 모델 로드
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-crnn_model = CRNN(imgH=128, nc=3, nclass=8, nh=256).to(device)
-crnn_model.load_state_dict(torch.load('data/models/best_crnn_model.pth'))  # 훈련된 모델 경로
-crnn_model.eval()
+model = ModifiedEfficientNetB0Model(nclass=5).to(device)
+model.load_state_dict(torch.load('data/models/best_model.pth'))  # 훈련된 모델 경로
+model.eval()
 
 # 이미지 전처리 변환 정의
 transform = transforms.Compose([
@@ -79,7 +70,7 @@ def put_korean_text(image, text, position, font_path='data/NanumGothic.ttf', fon
     return img
 
 # CCTV 영상 처리
-video_path = 'data/test2.mp4'
+video_path = 'abcd.mp4'
 cap = cv2.VideoCapture(video_path)
 
 while cap.isOpened():
@@ -100,7 +91,7 @@ while cap.isOpened():
             vehicle_img = frame[int(y1):int(y2), int(x1):int(x2)]
             
             # 차량 종류 분류 (CRNN)
-            vehicle_type = classify_vehicle(vehicle_img, crnn_model, transform, device)
+            vehicle_type = classify_vehicle(vehicle_img, model, transform, device)
             
             # 결과를 영상에 표시 (한글 폰트 사용)
             frame = put_korean_text(frame, f'{vehicle_type}', (int(x1), int(y1) - 40))

@@ -1,53 +1,44 @@
 import cv2
 import torch
+import torch.nn as nn
 from torchvision import transforms
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
+import torchvision.models as models
 
 # PyTorch Hub에서 YOLOv5 모델 로드
 yolo_model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
 
-# CRNN 모델 정의 (이전 코드 그대로 사용)
-class CRNN(torch.nn.Module):
-    def __init__(self, imgH, nc, nclass, nh):
-        super(CRNN, self).__init__()
-        self.cnn = torch.nn.Sequential(
-            torch.nn.Conv2d(nc, 64, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(64),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(128),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
-            torch.nn.BatchNorm2d(256),
-            torch.nn.ReLU(True),
-            torch.nn.MaxPool2d(2, 2),
-            torch.nn.AdaptiveAvgPool2d((1, None))
+# EfficientNetB0 모델로 수정
+class ModifiedEfficientNetB0Model(nn.Module):
+    def __init__(self, nclass, pretrained=True):
+        super(ModifiedEfficientNetB0Model, self).__init__()
+        
+        # torchvision에서 제공하는 EfficientNetB0 모델 불러오기
+        self.efficientnet_b0 = models.efficientnet_b0(pretrained=pretrained)
+        
+        # 기존 FC 레이어를 덮어쓰기 전에 새로운 FC 레이어를 추가
+        num_ftrs = self.efficientnet_b0.classifier[1].in_features  # EfficientNetB0의 기본 FC 입력 차원
+        
+        # 새로운 FC 레이어 추가
+        self.efficientnet_b0.classifier = nn.Sequential(
+            nn.Linear(num_ftrs, 512),  # 첫 번째 FC 레이어 (새로 추가된 레이어)
+            nn.ReLU(True),             # 활성화 함수
+            nn.Dropout(0.5),           # 드롭아웃으로 과적합 방지
+            nn.Linear(512, nclass)     # 최종 출력 레이어 (nclass로 설정)
         )
-
-        self.rnn = torch.nn.LSTM(256, nh, bidirectional=True, batch_first=True)
-        self.fc = torch.nn.Linear(nh * 2, nclass)
-
+    
     def forward(self, x):
-        conv = self.cnn(x)
-        b, c, h, w = conv.size()
-        conv = conv.squeeze(2)
-        conv = conv.permute(0, 2, 1)
-        output, _ = self.rnn(conv)
-        output = output[:, -1, :]
-        output = self.fc(output)
-        return output
+        return self.efficientnet_b0(x)
 
 # 차량 클래스 정의
 vehicle_classes = ['SUV', '버스', '세단', '이륜차', '트럭']
 
 # 사전 학습된 CRNN 모델 로드
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-crnn_model = CRNN(imgH=128, nc=3, nclass=5, nh=256).to(device)
-crnn_model.load_state_dict(torch.load('data/models/best_crnn_model.pth'))  # 훈련된 모델 경로
-crnn_model.eval()
+model = ModifiedEfficientNetB0Model(nclass=5).to(device)
+model.load_state_dict(torch.load('data/models/best_model.pth'))  # 훈련된 모델 경로
+model.eval()
 
 # 이미지 전처리 변환 정의
 transform = transforms.Compose([
@@ -61,11 +52,17 @@ def classify_vehicle(image, model, transform, device):
     image = transform(image).unsqueeze(0).to(device)  # 이미지 전처리
     with torch.no_grad():
         output = model(image)
+        probs = torch.softmax(output, dim=1)  # 모든 클래스에 대한 확률 계산
         _, predicted = output.max(1)
-    return vehicle_classes[predicted.item()]
+        predicted_class = predicted.item()
+        predicted_prob = probs[0, predicted_class].item() * 100  # 예측된 클래스의 확률 (%) 반환
+
+        # 모든 클래스의 확률을 반환
+        class_probs = probs[0].cpu().numpy() * 100
+    return vehicle_classes[predicted_class], predicted_prob, class_probs
 
 # 한글 텍스트를 이미지에 추가하는 함수
-def put_korean_text(image, text, position, font_path='data/NanumGothic.ttf', font_size=30, color=(255, 0, 0)):
+def put_korean_text(image, text, position, font_path='data/NanumGothic.ttf', font_size=20, color=(255, 0, 0)):
     # OpenCV 이미지를 PIL 이미지로 변환
     img_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
@@ -79,7 +76,7 @@ def put_korean_text(image, text, position, font_path='data/NanumGothic.ttf', fon
     return img
 
 # 테스트할 이미지 경로
-image_path = 'data/2.jpg'
+image_path = 'data/1.jpg'
 
 # 이미지 읽기
 image = cv2.imread(image_path)
@@ -96,11 +93,16 @@ for result in results.xyxy[0]:
         # 탐지된 차량 부분만 크롭
         vehicle_img = image[int(y1):int(y2), int(x1):int(x2)]
         
-        # 차량 종류 분류 (CRNN)
-        vehicle_type = classify_vehicle(vehicle_img, crnn_model, transform, device)
+        # 차량 종류 분류 (CRNN) 및 확률 계산
+        vehicle_type, vehicle_prob, class_probs = classify_vehicle(vehicle_img, model, transform, device)
+        
+        # 모든 클래스 확률을 텍스트로 생성
+        class_prob_text = "\n".join([f"{vehicle_classes[i]}: {class_probs[i]:.2f}%" for i in range(len(vehicle_classes))])
         
         # 결과를 이미지에 표시 (한글 폰트 사용)
-        image = put_korean_text(image, f'{vehicle_type}', (int(x1), int(y1) - 40))
+        # display_text = f'{vehicle_type} ({vehicle_prob:.2f}%)\n{class_prob_text}'
+        display_text = f'{vehicle_type} ({vehicle_prob:.2f}%)'
+        image = put_korean_text(image, display_text, (int(x1), int(y1) - 40))  # 텍스트 위치 조정
 
         # 탐지 박스 그리기
         cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
